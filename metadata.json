@@ -1,0 +1,7 @@
+{
+  "name": "Parlamento Familiar - Almada Aquino",
+  "description": "Sistema legislativo de élite para la gestión del Parlamento Familiar.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
