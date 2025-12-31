@@ -25,13 +25,11 @@
         }
         .font-institutional { font-family: 'Cinzel', serif; }
         
-        /* Efecto Mármol Premium */
         .marble-pattern {
             background-color: #ffffff;
             background-image: url("https://www.transparenttextures.com/patterns/marble-similar.png");
         }
 
-        /* Hemiciclo de Lujo */
         .senate-arc {
             display: flex;
             flex-wrap: wrap;
@@ -71,7 +69,6 @@
 
         .navy-gradient { background: linear-gradient(135deg, #020617 0%, #0F172A 100%); }
         
-        /* Pulse Speaker */
         @keyframes speaker-glow {
             0% { box-shadow: 0 0 0 0 rgba(212, 175, 55, 0.6); transform: scale(1.1); }
             70% { box-shadow: 0 0 0 20px rgba(212, 175, 55, 0); transform: scale(1.1); }
@@ -87,12 +84,6 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--gold); border-radius: 10px; }
 
-        .glass {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-        }
-
         .animate-in {
             animation: slideUp 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
@@ -104,16 +95,14 @@
 <script type="importmap">
 {
   "imports": {
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
-    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
-    "vite": "https://esm.sh/vite@^7.3.0",
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
     "react/": "https://esm.sh/react@^19.2.3/",
     "react": "https://esm.sh/react@^19.2.3",
-    "gun/gun": "https://esm.sh/gun@0.2020.1239/gun.js",
-    "gun": "https://esm.sh/gun@0.2020.1239",
-    "gun/": "https://esm.sh/gun@^0.2020.1241/"
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "@vitejs/plugin-react": "https://esm.sh/@vitejs/plugin-react@^5.1.2",
+    "vite": "https://esm.sh/vite@^7.3.0",
+    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
+    "gun": "https://esm.sh/gun@^0.2020.1241"
   }
 }
 </script>
