@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Role, User, Moción, AppState, VoteType, SessionStatus } from './types';
+import { Role, User, Moción, AppState, VoteType, SessionStatus, VotoGuardado, Acta } from './types';
 import { INITIAL_USERS } from './constants';
 import { 
   Users, LogOut, Menu, Mic2, FileText, 
   Landmark, Home, DollarSign, 
   ShieldAlert, Newspaper, Camera, UserPlus, CreditCard, ShieldX, CheckCircle2, XCircle, Gavel, Sparkles, Send,
-  Clock, Trash2, ChevronRight, Activity, ShieldCheck, Crown
+  Clock, Trash2, ChevronRight, Activity, ShieldCheck, Crown, Music, Tv, Book, Archive, Gamepad2, Play, Eraser, FileBox, ScrollText, History, Info, BrainCircuit
 } from 'lucide-react';
 import Gun from 'gun';
 import { geminiAssistant } from './geminiService';
@@ -16,7 +16,7 @@ const gun = Gun({
   localStorage: true
 });
 
-const DB_KEY = 'PARLAMENTO_FAMILIAR_SUPREME_V1';
+const DB_KEY = 'PARLAMENTO_AA_V5_STABLE';
 const db = gun.get(DB_KEY);
 
 export default function App() {
@@ -27,26 +27,21 @@ export default function App() {
   const [dniInput, setDniInput] = useState('');
   const [passInput, setPassInput] = useState('');
   
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiResponse, setAiResponse] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-
   const [appState, setAppState] = useState<AppState>({
     users: INITIAL_USERS,
     mociones: [],
     finanzas: [],
-    sanciones: [],
-    noticias: [],
+    votosHistorial: [],
+    actas: [],
     activeVote: null,
     sessionStatus: 'CERRADA',
     speakerId: null,
-    sessionStartTime: null,
-    waitingList: [],
-    intermissionTimer: null
+    proyeccion: { tipo: 'NADA' },
+    sessionStartTime: null
   });
 
   useEffect(() => {
-    // Sincronización Real-Time
+    // Escuchar cambios globales
     db.get('config').on((data: any) => {
       if (!data) return;
       setAppState(prev => ({
@@ -54,61 +49,77 @@ export default function App() {
         sessionStatus: data.status || 'CERRADA',
         sessionStartTime: data.startTime,
         speakerId: data.speakerId,
-        activeVote: data.activeVote ? JSON.parse(data.activeVote) : null
+        activeVote: data.activeVote ? JSON.parse(data.activeVote) : null,
+        proyeccion: data.proyeccion ? JSON.parse(data.proyeccion) : { tipo: 'NADA' }
       }));
     });
 
+    // Escuchar usuarios
     db.get('users').map().on((data: any, id: string) => {
       if (!data) return;
       setAppState(prev => {
         const users = [...prev.users];
         const idx = users.findIndex(u => u.id === id);
+        const newUser = { ...data, id };
         if (idx !== -1) {
-          users[idx] = { ...data, id };
+          users[idx] = newUser;
           return { ...prev, users };
         }
-        return { ...prev, users: [...users, { ...data, id }] };
+        return { ...prev, users: [...users, newUser] };
       });
     });
 
-    db.get('mociones').map().on((data: any, id: string) => {
+    // Escuchar historial de votos
+    db.get('votos_historial').map().on((data: any, id: string) => {
       if (!data) return;
       setAppState(prev => {
-        const list = [...prev.mociones];
-        const idx = list.findIndex(m => m.id === id);
-        if (idx !== -1) {
-          list[idx] = { ...data, id };
-          return { ...prev, mociones: list };
-        }
-        return { ...prev, mociones: [...list, { ...data, id }] };
+        if (prev.votosHistorial.find(v => v.id === id)) return prev;
+        return { ...prev, votosHistorial: [...prev.votosHistorial, { ...data, id }] };
       });
     });
 
+    // Escuchar actas
+    db.get('actas').map().on((data: any, id: string) => {
+      if (!data) return;
+      setAppState(prev => {
+        if (prev.actas.find(a => a.id === id)) return prev;
+        return { ...prev, actas: [...prev.actas, { ...data, id }] };
+      });
+    });
+
+    // Escuchar finanzas y mociones
     db.get('finanzas').map().on((data: any, id: string) => {
-      if (!data) return;
-      setAppState(prev => {
-        const list = [...prev.finanzas];
-        const idx = list.findIndex(f => f.id === id);
-        if (idx !== -1) {
-          list[idx] = { ...data, id };
-          return { ...prev, finanzas: list };
-        }
-        return { ...prev, finanzas: [...list, { ...data, id }] };
-      });
+        if (!data) return;
+        setAppState(prev => {
+          if (prev.finanzas.find(f => f.id === id)) return prev;
+          return { ...prev, finanzas: [...prev.finanzas, { ...data, id }] };
+        });
+    });
+    db.get('mociones').map().on((data: any, id: string) => {
+        if (!data) return;
+        setAppState(prev => {
+          const idx = prev.mociones.findIndex(m => m.id === id);
+          if (idx !== -1) {
+            const list = [...prev.mociones];
+            list[idx] = { ...data, id };
+            return { ...prev, mociones: list };
+          }
+          return { ...prev, mociones: [...prev.mociones, { ...data, id }] };
+        });
     });
   }, []);
 
-  const isAdmin = currentUser?.cargo === Role.PRESIDENTE || currentUser?.dni === '49993070';
+  const isAdmin = currentUser?.dni === '49993070';
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    const user = appState.users.find(u => u.dni === dniInput && (u.password === passInput || passInput === 'ADMIN'));
-    if (user) {
-      setCurrentUser(user);
+    const found = appState.users.find(u => u.dni === dniInput && (u.password === passInput || u.dni === passInput));
+    if (found) {
+      setCurrentUser(found);
       setIsLogged(true);
-      db.get('users').get(user.id).put({ confirmado: true });
+      db.get('users').get(found.id).put({ presente: true, confirmado: true });
     } else {
-      alert("ACCESO RESTRINGIDO. IDENTIDAD NO VÁLIDA.");
+      alert("CREDENCIALES INCORRECTAS");
     }
   };
 
@@ -118,117 +129,158 @@ export default function App() {
       status, 
       startTime: status === 'ACTIVA' ? new Date().toLocaleTimeString() : appState.sessionStartTime 
     });
-    if (status === 'CERRADA') {
-      db.get('config').put({ speakerId: null, activeVote: null });
-      db.get('speakers').put(null);
-    }
+  };
+
+  const setProyeccion = (tipo: any, titulo?: string, subtitulo?: string) => {
+    db.get('config').put({ proyeccion: JSON.stringify({ tipo, titulo, subtitulo }) });
+  };
+
+  const cerrarVotacion = () => {
+    if (!appState.activeVote) return;
+    const votantes = appState.users.filter(u => u.confirmado && u.votoActual);
+    const si = votantes.filter(v => v.votoActual === 'YES').length;
+    const no = votantes.filter(v => v.votoActual === 'NO').length;
+    const abs = votantes.filter(v => v.votoActual === 'ABSTAIN').length;
+    
+    const id = Math.random().toString(36).substr(2, 9);
+    const resultado = si > no ? 'APROBADA' : 'RECHAZADA';
+    
+    // Detalle por persona
+    const detallesStr = votantes.map(v => `${v.nombre} ${v.apellido}: ${v.votoActual === 'YES' ? 'Afirmativo' : v.votoActual === 'NO' ? 'Negativo' : 'Abstención'}`).join(', ');
+    const textoFinal = `Ha sido ${resultado.toLowerCase()} por la mayoría de votos (${si}). ${detallesStr}`;
+
+    const votoData: VotoGuardado = {
+      id,
+      asunto: appState.activeVote.asunto,
+      fecha: new Date().toLocaleString(),
+      resultado,
+      totalSi: si,
+      totalNo: no,
+      totalAbstencion: abs,
+      textoDetalle: textoFinal
+    };
+
+    db.get('votos_historial').get(id).put(votoData);
+    
+    // Reset votos
+    appState.users.forEach(u => {
+      db.get('users').get(u.id).put({ votoActual: null });
+    });
+
+    db.get('config').put({ activeVote: null });
+    setProyeccion('RESULTADO', resultado, `Votos: ${si} AF, ${no} NEG, ${abs} ABS`);
   };
 
   if (!isLogged) {
     return (
       <div className="min-h-screen flex items-center justify-center marble-pattern p-6">
-        <div className="absolute inset-0 bg-[#020617]/5 pointer-events-none" />
-        <div className="w-full max-w-md bg-white p-14 rounded-[4rem] shadow-[0_60px_100px_-20px_rgba(0,0,0,0.15)] border-t-[14px] border-[#D4AF37] text-center animate-in relative z-10">
-          <div className="w-28 h-28 gold-gradient rounded-[2.8rem] flex items-center justify-center mx-auto mb-10 shadow-2xl">
-            <Landmark size={56} className="text-white" />
+        <div className="w-full max-w-lg bg-white p-16 rounded-[4rem] shadow-[0_40px_100px_rgba(0,0,0,0.2)] border-t-[14px] border-[#D4AF37] text-center animate-in">
+          <div className="w-24 h-24 gold-gradient rounded-[2rem] flex items-center justify-center mx-auto mb-10 shadow-2xl">
+            <Landmark size={48} className="text-white" />
           </div>
-          <h1 className="text-4xl font-institutional font-black text-slate-900 mb-2 uppercase tracking-tight">Recinto de Honor</h1>
-          <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.6em] mb-12 italic">Almada Aquino • Elite Legislativa</p>
-          <form onSubmit={handleLogin} className="space-y-7 text-left">
-            <div>
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-8 mb-3 block tracking-widest">Identificación DNI</label>
-              <input type="text" value={dniInput} onChange={e => setDniInput(e.target.value)} className="w-full p-7 rounded-[2rem] bg-slate-50 border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold transition-all text-center text-2xl shadow-inner" placeholder="Escriba su DNI" />
-            </div>
-            <div>
-              <label className="text-[11px] font-black uppercase text-slate-500 ml-8 mb-3 block tracking-widest">Clave Maestra</label>
-              <input type="password" value={passInput} onChange={e => setPassInput(e.target.value)} className="w-full p-7 rounded-[2rem] bg-slate-50 border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold transition-all text-center text-2xl shadow-inner" placeholder="••••••••" />
-            </div>
-            <button className="w-full gold-gradient py-7 rounded-[2rem] font-black text-white uppercase tracking-[0.2em] shadow-2xl hover:scale-[1.03] active:scale-[0.98] transition-all text-sm">Validar e Ingresar</button>
+          <h1 className="text-4xl font-institutional font-black text-slate-900 mb-2 uppercase">Parlamento Familiar</h1>
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.8em] mb-12">Almada Aquino • Lista 001</p>
+          <form onSubmit={handleLogin} className="space-y-6">
+            <input type="text" value={dniInput} onChange={e => setDniInput(e.target.value)} className="w-full p-6 rounded-[1.8rem] bg-slate-50 border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold text-center text-2xl shadow-inner transition-all" placeholder="DNI" />
+            <input type="password" value={passInput} onChange={e => setPassInput(e.target.value)} className="w-full p-6 rounded-[1.8rem] bg-slate-50 border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold text-center text-2xl shadow-inner transition-all" placeholder="CLAVE" />
+            <button className="w-full gold-gradient py-7 rounded-[1.8rem] font-black text-white uppercase text-lg shadow-xl hover:scale-105 active:scale-95 transition-all">Ingresar al Recinto</button>
           </form>
+          <p className="mt-12 text-[9px] font-bold text-slate-300 uppercase tracking-widest italic">Puerto Esperanza • Misiones</p>
         </div>
       </div>
     );
   }
 
+  // Fallback para evitar el error de lectura [0]
+  const userName = currentUser?.nombre || 'Legislador';
+  const userInitial = userName?.[0] || 'L';
+
   return (
     <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
-      {/* SIDEBAR DE ALTO NIVEL */}
-      <aside className={`${isSidebarCollapsed ? 'w-24' : 'w-80'} navy-gradient flex flex-col transition-all duration-500 shadow-2xl z-50`}>
-        <div className="h-32 flex items-center px-10 bg-black/30 border-b border-white/5">
-          <Landmark size={32} className="text-[#D4AF37]" />
-          {!isSidebarCollapsed && <span className="ml-5 font-institutional font-black text-white text-[12px] tracking-[0.4em] uppercase truncate">Gran Parlamento AA</span>}
+      {/* SIDEBAR */}
+      <aside className={`${isSidebarCollapsed ? 'w-24' : 'w-80'} navy-gradient flex flex-col transition-all duration-500 shadow-2xl z-50 border-r border-[#D4AF37]/30`}>
+        <div className="h-28 flex items-center px-8 bg-black/30 border-b border-white/5">
+          <Landmark size={28} className="text-[#D4AF37]" />
+          {!isSidebarCollapsed && <span className="ml-4 font-institutional font-black text-white text-[10px] tracking-[0.3em] uppercase truncate">Parlamento AA</span>}
         </div>
         
-        <nav className="flex-1 py-14 px-7 space-y-4 overflow-y-auto custom-scrollbar">
-          <NavItem id="home" label="Dashboard" icon={<Home size={22}/>} active={activeTab} onClick={setActiveTab} />
-          <NavItem id="recinto" label="El Recinto" icon={<Gavel size={22}/>} active={activeTab} onClick={setActiveTab} />
-          <NavItem id="mociones" label="Mociones" icon={<FileText size={22}/>} active={activeTab} onClick={setActiveTab} />
-          <NavItem id="credencial" label="Credencial" icon={<CreditCard size={22}/>} active={activeTab} onClick={setActiveTab} />
+        <nav className="flex-1 py-8 px-4 space-y-2 overflow-y-auto custom-scrollbar">
+          <NavItem id="home" label="Dashboard" icon={<Home size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="proyeccion" label="Proyección" icon={<Tv size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="recinto" label="El Recinto" icon={<Gavel size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="mociones" label="Mociones" icon={<FileText size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="historial" label="Leyes Aprobadas" icon={<Archive size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="secretarias" label="Secretarías" icon={<FileBox size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="estatutos" label="Estatutos y Ley" icon={<ScrollText size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="juegos" label="Juegos y Receso" icon={<Gamepad2 size={20}/>} active={activeTab} onClick={setActiveTab} />
+          <NavItem id="advisor" label="Asesor Superior" icon={<BrainCircuit size={20}/>} active={activeTab} onClick={setActiveTab} />
 
           {isAdmin && (
-            <div className="pt-20 space-y-4">
-              <p className="text-[10px] font-black text-slate-600 uppercase tracking-widest px-7 mb-6 italic opacity-60">Gobierno Superior</p>
-              <NavItem id="usuarios" label="Censo" icon={<Users size={22}/>} active={activeTab} onClick={setActiveTab} />
-              <NavItem id="finanzas" label="Tesorería" icon={<DollarSign size={22}/>} active={activeTab} onClick={setActiveTab} />
+            <div className="pt-8 space-y-2">
+              <p className="text-[9px] font-black text-[#D4AF37] uppercase px-4 mb-3 opacity-70 tracking-widest">Presidencia</p>
+              <NavItem id="sesion_master" label="Parte de la Sesión" icon={<Play size={20}/>} active={activeTab} onClick={setActiveTab} />
+              <NavItem id="censo" label="Censo Legislativo" icon={<Users size={20}/>} active={activeTab} onClick={setActiveTab} />
+              <NavItem id="finanzas" label="Tesorería" icon={<DollarSign size={20}/>} active={activeTab} onClick={setActiveTab} />
             </div>
           )}
         </nav>
 
-        <div className="p-10 bg-black/50 flex items-center justify-between border-t border-white/5 backdrop-blur-md">
-          <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-slate-800 border-2 border-[#D4AF37]/40 overflow-hidden shadow-2xl">
-              {currentUser?.foto ? <img src={currentUser.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white/10 uppercase text-xl font-institutional">{currentUser?.nombre[0]}</div>}
+        <div className="p-6 bg-black/50 flex items-center justify-between border-t border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 border-2 border-[#D4AF37] overflow-hidden shadow-xl transform rotate-3">
+              {currentUser?.foto ? <img src={currentUser.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-white/20 uppercase text-lg font-institutional">{userInitial}</div>}
             </div>
             {!isSidebarCollapsed && (
               <div className="flex flex-col">
-                <span className="text-[11px] font-black text-white truncate max-w-[120px] uppercase tracking-tight leading-none">{currentUser?.nombre}</span>
-                <span className="text-[9px] font-bold text-[#D4AF37] uppercase tracking-widest mt-1 opacity-80">Legislador</span>
+                <span className="text-[10px] font-black text-white uppercase truncate max-w-[120px]">{currentUser?.nombre}</span>
+                <span className="text-[8px] font-bold text-[#D4AF37] uppercase tracking-widest mt-0.5">{currentUser?.cargo}</span>
               </div>
             )}
           </div>
-          <button onClick={() => setIsLogged(false)} className="text-slate-500 hover:text-rose-500 transition-all hover:scale-110"><LogOut size={24}/></button>
+          <button onClick={() => setIsLogged(false)} className="text-slate-500 hover:text-rose-500 transition-all"><LogOut size={22}/></button>
         </div>
       </aside>
 
+      {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-28 bg-white/80 backdrop-blur-3xl border-b px-14 flex items-center justify-between z-40 shadow-sm">
-          <div className="flex items-center gap-14">
-            <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="p-3.5 text-slate-400 hover:text-slate-900 transition-all hover:bg-slate-50 rounded-2xl"><Menu size={26}/></button>
-            <div className="flex items-center gap-7">
-              <div className={`flex items-center gap-4 px-10 py-3.5 rounded-full text-[11px] font-black uppercase tracking-widest border-2 shadow-sm transition-all ${
-                appState.sessionStatus === 'ACTIVA' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'
+        <header className="h-24 bg-white/95 backdrop-blur-xl border-b px-12 flex items-center justify-between z-40">
+          <div className="flex items-center gap-10">
+            <button onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} className="p-3 text-slate-400 hover:text-slate-900 transition-all hover:bg-slate-50 rounded-xl"><Menu size={24}/></button>
+            <div className={`px-8 py-2.5 rounded-full text-[10px] font-black uppercase tracking-widest border-2 ${
+                appState.sessionStatus === 'ACTIVA' ? 'bg-emerald-50 text-emerald-600 border-emerald-100 animate-pulse' : 
+                appState.sessionStatus === 'CUARTO_INTERMEDIO' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-rose-50 text-rose-600 border-rose-100'
               }`}>
-                <span className={`w-3 h-3 rounded-full ${appState.sessionStatus === 'ACTIVA' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
-                CONSEJO {appState.sessionStatus}
-              </div>
-              {appState.sessionStartTime && <span className="text-[11px] font-black text-slate-400 uppercase font-institutional tracking-widest">Apertura: {appState.sessionStartTime}</span>}
+                SESIÓN: {appState.sessionStatus}
             </div>
           </div>
 
-          <div className="flex items-center gap-10">
+          <div className="flex items-center gap-8">
             {appState.speakerId && (
-              <div className="flex items-center gap-6 bg-slate-950 text-white px-12 py-4 rounded-[2rem] shadow-2xl border-b-4 border-[#D4AF37] animate-in">
-                <Activity size={20} className="text-[#D4AF37] animate-pulse" />
-                <span className="text-[12px] font-black uppercase tracking-widest truncate max-w-[280px]">Uso de Palabra: {appState.users.find(u => u.id === appState.speakerId)?.nombre}</span>
+              <div className="flex items-center gap-4 bg-[#020617] text-white px-8 py-3 rounded-full shadow-2xl border-b-2 border-[#D4AF37]">
+                <Activity size={16} className="text-[#D4AF37] animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest">En Palabra: {appState.users.find(u => u.id === appState.speakerId)?.nombre}</span>
               </div>
             )}
-            {isAdmin && (
-              <div className="flex gap-5">
-                <button onClick={() => updateSession('ACTIVA')} className="bg-slate-950 text-white px-10 py-4.5 rounded-[1.8rem] text-[11px] font-black uppercase tracking-widest shadow-2xl gold-border hover:brightness-110 transition-all">Iniciar Sesión</button>
-                <button onClick={() => updateSession('CERRADA')} className="bg-rose-900 text-white px-10 py-4.5 rounded-[1.8rem] text-[11px] font-black uppercase tracking-widest shadow-2xl hover:brightness-110 transition-all">Levantar Sesión</button>
-              </div>
-            )}
+            <button onClick={() => db.get('users').get(currentUser?.id!).put({ presente: !currentUser?.presente })} className={`px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all ${currentUser?.presente ? 'bg-emerald-600 text-white' : 'bg-slate-200 text-slate-500'}`}>
+              {currentUser?.presente ? 'PRESENTE' : 'DAR PRESENTE'}
+            </button>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-16 custom-scrollbar marble-pattern">
-          <div className="max-w-[85rem] mx-auto space-y-20 animate-in">
+        <div className="flex-1 overflow-y-auto p-12 custom-scrollbar marble-pattern relative">
+          <div className="max-w-[85rem] mx-auto space-y-16">
             {activeTab === 'home' && <HomeView user={currentUser!} appState={appState} />}
+            {activeTab === 'proyeccion' && <ProyeccionView appState={appState} />}
             {activeTab === 'recinto' && <RecintoView users={appState.users} appState={appState} currentUser={currentUser!} isAdmin={isAdmin} db={db} />}
             {activeTab === 'mociones' && <MocionesView mociones={appState.mociones} user={currentUser!} isAdmin={isAdmin} db={db} />}
-            {activeTab === 'credencial' && <CredencialView user={currentUser!} />}
-            {activeTab === 'usuarios' && <UsuariosView users={appState.users} isAdmin={isAdmin} db={db} />}
+            {activeTab === 'sesion_master' && <SesionMasterView appState={appState} updateSession={updateSession} db={db} cerrarVotacion={cerrarVotacion} setProyeccion={setProyeccion} />}
+            {activeTab === 'censo' && <CensoView users={appState.users} isAdmin={isAdmin} db={db} />}
+            {activeTab === 'historial' && <HistorialView historial={appState.votosHistorial} />}
             {activeTab === 'finanzas' && <FinanzasView finanzas={appState.finanzas} db={db} />}
+            {activeTab === 'secretarias' && <SecretariasView />}
+            {activeTab === 'estatutos' && <EstatutosView />}
+            {activeTab === 'juegos' && <JuegosView />}
+            {activeTab === 'advisor' && <AdvisorView />}
           </div>
         </div>
       </main>
@@ -236,232 +288,200 @@ export default function App() {
   );
 }
 
-// --- COMPONENTES DE DISEÑO SUPREMO ---
+// --- SUB-COMPONENTES ---
 
 function NavItem({ id, label, icon, active, onClick }: any) {
   const isActive = active === id;
   return (
-    <button onClick={() => onClick(id)} className={`w-full flex items-center gap-6 p-6 rounded-[2.2rem] transition-all ${isActive ? 'gold-gradient text-white shadow-2xl scale-[1.06]' : 'text-slate-500 hover:text-white hover:bg-white/10'}`}>
+    <button onClick={() => onClick(id)} className={`w-full flex items-center gap-5 p-4 rounded-2xl transition-all duration-300 ${isActive ? 'gold-gradient text-white shadow-2xl scale-[1.05]' : 'text-slate-400 hover:text-white hover:bg-white/10'}`}>
       {icon}
-      <span className="text-[13px] font-black uppercase tracking-widest">{label}</span>
+      <span className="text-[11px] font-black uppercase tracking-widest">{label}</span>
     </button>
   );
 }
 
 function HomeView({ user, appState }: any) {
   return (
-    <div className="space-y-20">
-      <div className="navy-gradient p-28 rounded-[5.5rem] text-white shadow-[0_60px_130px_-20px_rgba(0,0,0,0.6)] relative overflow-hidden group border-b-[35px] border-[#D4AF37]">
+    <div className="space-y-16">
+      <div className="navy-gradient p-20 rounded-[4rem] text-white shadow-2xl relative overflow-hidden group border-b-[20px] border-[#D4AF37]">
         <div className="absolute inset-0 marble-pattern opacity-10 pointer-events-none" />
         <div className="relative z-10">
-          <div className="flex items-center gap-5 mb-10">
-            <div className="w-16 h-1 gold-gradient rounded-full opacity-50" />
-            <p className="text-[#D4AF37] font-black uppercase text-[15px] tracking-[0.8em] font-institutional">Bienvenido Legislador</p>
-          </div>
-          <h2 className="text-[9rem] font-institutional font-black uppercase tracking-tighter mb-10 leading-[0.75] italic group-hover:translate-x-5 transition-transform duration-1000">{user.nombre} <br/> {user.apellido}</h2>
-          <div className="flex gap-8 mt-20">
-            <span className="px-20 py-6 gold-gradient rounded-[2rem] text-[15px] font-black uppercase tracking-widest text-white shadow-2xl flex items-center gap-4"><Crown size={20}/> {user.cargo}</span>
-            <span className="px-20 py-6 bg-white/10 rounded-[2rem] text-[15px] font-black uppercase tracking-widest border border-white/5 backdrop-blur-xl">Curul № {user.banca + 1}</span>
+          <p className="text-[#D4AF37] font-black uppercase text-[14px] tracking-[0.8em] mb-6 font-institutional">Honorable Legislador AA</p>
+          <h2 className="text-[7rem] font-institutional font-black uppercase tracking-tighter mb-4 italic leading-tight">{user.nombre} <br/> {user.apellido}</h2>
+          <div className="flex gap-4 mt-10">
+            <span className="px-10 py-4 gold-gradient rounded-full text-[12px] font-black uppercase tracking-widest text-white shadow-2xl flex items-center gap-3"><Crown size={18}/> {user.cargo}</span>
+            <span className="px-10 py-4 bg-white/10 rounded-full text-[12px] font-black uppercase tracking-widest border border-white/5 backdrop-blur-xl">Banca № {user.banca + 1}</span>
           </div>
         </div>
-        <Landmark size={700} className="absolute -right-56 -bottom-56 text-white/5 rotate-12 group-hover:rotate-45 transition-all duration-[10s]" />
+        <Landmark size={500} className="absolute -right-20 -bottom-20 text-white/5 rotate-12" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-14">
-        <div className="lg:col-span-2 bg-white p-20 rounded-[5rem] shadow-2xl border border-slate-100 flex flex-col items-center justify-center text-center relative overflow-hidden group">
-            <div className="absolute top-0 left-0 w-full h-2 gold-gradient opacity-20" />
-            <ShieldCheck size={90} className="text-[#D4AF37] mb-10 group-hover:scale-110 transition-transform" />
-            <h3 className="text-4xl font-institutional font-black uppercase tracking-widest text-slate-900 mb-6">Sesión Permanente</h3>
-            <p className="text-slate-500 text-2xl font-medium max-w-xl leading-relaxed italic opacity-80">"Aquí se deliberan los destinos de la estirpe Almada Aquino. Que prevalezca el honor y la justicia en cada palabra vertida."</p>
-        </div>
-        <div className="space-y-12">
-            <div className="bg-slate-950 p-20 rounded-[5rem] shadow-2xl border-t-[12px] border-[#D4AF37] text-center">
-                <Clock size={70} className="text-[#D4AF37] mx-auto mb-8" />
-                <h4 className="text-[14px] font-black text-slate-600 uppercase tracking-widest mb-4">Reloj Parlamentario</h4>
-                <p className="text-5xl font-institutional font-black text-white uppercase tracking-tighter">{appState.sessionStatus}</p>
-            </div>
-            <div className="bg-white p-20 rounded-[5rem] shadow-2xl border border-slate-100 text-center flex flex-col items-center">
-                <Users size={60} className="text-[#D4AF37] mb-6" />
-                <h4 className="text-[14px] font-black text-slate-400 uppercase tracking-widest mb-2">Legisladores Activos</h4>
-                <p className="text-5xl font-institutional font-black text-slate-900">{appState.users.filter(u => u.confirmado).length}</p>
-            </div>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+        <StatCard title="Estado Actual" value={user.presente ? 'EN EL RECINTO' : 'AUSENTE'} color={user.presente ? 'text-emerald-500' : 'text-rose-500'} />
+        <StatCard title="Sesión Activa" value={appState.sessionStatus} color="text-amber-500" />
+        <StatCard title="Quórum Familiar" value={`${appState.users.filter(u => u.presente).length} / ${appState.users.length}`} color="text-slate-900" />
       </div>
     </div>
   );
 }
 
-function RecintoView({ users, appState, currentUser, isAdmin, db }: any) {
-  const handleSeatClick = (u: User) => {
-    if (isAdmin) {
-      if (confirm(`¿Conceder uso de la palabra al Honorable ${u.nombre}?`)) {
-        db.get('config').put({ speakerId: u.id });
-      }
-    }
-  };
+function StatCard({ title, value, color }: any) {
+  return (
+    <div className="bg-white p-12 rounded-[3rem] shadow-xl border-b-8 border-slate-50 text-center">
+      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">{title}</h3>
+      <p className={`text-3xl font-institutional font-black uppercase ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function ProyeccionView({ appState }: any) {
+  const visible = appState.sessionStatus !== 'CERRADA';
+
+  if (!visible) {
+    return (
+      <div className="h-[600px] flex flex-col items-center justify-center bg-slate-900 rounded-[4rem] text-center p-20 shadow-2xl border-b-[20px] border-slate-800">
+        <Tv size={100} className="text-slate-800 mb-10" />
+        <h2 className="text-4xl font-institutional font-black text-slate-700 uppercase">Proyección Desactivada</h2>
+        <p className="text-slate-600 uppercase tracking-widest mt-4">La pantalla cobrará vida cuando inicie la sesión oficial</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-[#020617] p-32 rounded-[8rem] shadow-[0_120px_200px_-50px_rgba(0,0,0,0.85)] min-h-[1300px] flex flex-col items-center relative overflow-hidden">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(212,175,55,0.18),transparent)]" />
+    <div className="min-h-[750px] bg-[#020617] rounded-[4rem] shadow-2xl relative overflow-hidden flex flex-col items-center justify-center p-20 text-center border-b-[25px] border-[#D4AF37]">
+      <div className="absolute inset-0 marble-pattern opacity-5 pointer-events-none" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(212,175,55,0.08),transparent)]" />
       
-      {/* Estrado Presidencial Supremo */}
-      <div className="w-[1100px] h-80 bg-white/95 rounded-t-[300px] shadow-[0_-50px_180px_rgba(212,175,55,0.35)] flex flex-col items-center justify-center border-b-[40px] border-slate-200 relative z-30">
-        <div className="flex gap-28 mt-14">
-          <PresiSeatRole label="VICEPRESIDENCIA I" role={Role.VICEPRESIDENTE_1} users={users} />
-          <PresiSeatRole label="PRESIDENCIA" role={Role.PRESIDENTE} users={users} isMain />
-          <PresiSeatRole label="VICEPRESIDENCIA II" role={Role.VICEPRESIDENTE_2} users={users} />
+      {appState.proyeccion.tipo === 'HIMNO' && (
+        <div className="animate-in space-y-12">
+          <Music size={120} className="text-[#D4AF37] mx-auto animate-bounce" />
+          <h2 className="text-7xl font-institutional font-black text-white uppercase italic">{appState.proyeccion.titulo}</h2>
+          <div className="w-64 h-2 gold-gradient mx-auto rounded-full shadow-[0_0_40px_rgba(212,175,55,0.5)]" />
+          <p className="text-3xl text-slate-400 font-bold uppercase tracking-[0.8em]">Silencio y Respeto</p>
         </div>
-        <p className="text-[16px] font-institutional font-black text-slate-400 tracking-[2.5em] mt-20 uppercase italic opacity-60">Almada Aquino</p>
-      </div>
+      )}
 
-      {/* Hemiciclo Legislativo 3D */}
-      <div className="mt-64 senate-arc max-w-[100rem] relative z-10 px-24">
-        {Array.from({ length: 38 }).map((_, i) => {
-          const u = users.find((x:any) => x.banca === i && x.confirmado);
-          let seatBase = 'bg-slate-900/50 border-slate-800 opacity-20';
-          let isSpeaking = u?.id === appState.speakerId;
-          
-          if (u) {
-            seatBase = 'bg-white border-white scale-110 shadow-2xl';
-            if (u.votoActual === 'YES') seatBase = 'bg-emerald-600 border-emerald-400 shadow-[0_0_60px_rgba(16,185,129,0.7)]';
-            if (u.votoActual === 'NO') seatBase = 'bg-rose-600 border-rose-400 shadow-[0_0_60px_rgba(244,63,94,0.7)]';
-          }
+      {appState.proyeccion.tipo === 'HOMENAJE' && (
+        <div className="animate-in space-y-12">
+          <Sparkles size={120} className="text-[#D4AF37] mx-auto animate-pulse" />
+          <h2 className="text-7xl font-institutional font-black text-white uppercase italic">MOMENTO DE LOS HOMENAJES</h2>
+          <p className="text-4xl text-slate-400 font-medium">Memoria Viva del Parlamento Familiar.</p>
+        </div>
+      )}
 
-          return (
-            <div key={i} onClick={() => u && handleSeatClick(u)} className={`banca-seat flex items-center justify-center border-[5px] ${seatBase} ${isSpeaking ? 'active-speaker scale-[1.5]' : ''}`}>
-              <span className="absolute -top-10 text-[12px] font-black text-white/20 uppercase tracking-[0.5em] font-institutional">Curul {i + 1}</span>
-              {u && (
-                <div className="w-full h-full rounded-[1.45rem] overflow-hidden">
-                  {u.foto ? <img src={u.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-slate-900 text-4xl font-institutional">{u.nombre[0]}</div>}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Voto Supremo Flotante */}
-      {appState.activeVote && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-white/95 p-24 rounded-[6rem] shadow-[0_70px_140px_rgba(0,0,0,0.65)] flex flex-col items-center z-50 border-[5px] border-[#D4AF37]/30 backdrop-blur-3xl animate-in">
-          <p className="text-[16px] font-black uppercase text-slate-400 mb-14 tracking-[1em] italic font-institutional">Voto Soberano: "{appState.activeVote.asunto}"</p>
-          <div className="flex gap-14">
-            <VoteBtnStyle label="AFIRMATIVO" color="bg-emerald-600" active={currentUser.votoActual === 'YES'} onClick={() => db.get('users').get(currentUser.id).put({votoActual: 'YES'})} />
-            <VoteBtnStyle label="NEGATIVO" color="bg-rose-600" active={currentUser.votoActual === 'NO'} onClick={() => db.get('users').get(currentUser.id).put({votoActual: 'NO'})} />
+      {appState.proyeccion.tipo === 'RESULTADO' && (
+        <div className="animate-in space-y-10">
+          <div className={`w-40 h-40 rounded-full mx-auto flex items-center justify-center border-8 ${appState.proyeccion.titulo === 'APROBADA' ? 'border-emerald-500 text-emerald-500' : 'border-rose-500 text-rose-500'} shadow-2xl`}>
+             {appState.proyeccion.titulo === 'APROBADA' ? <CheckCircle2 size={80} /> : <XCircle size={80} />}
           </div>
+          <h2 className="text-8xl font-institutional font-black text-white uppercase">VOTACIÓN {appState.proyeccion.titulo}</h2>
+          <p className="text-4xl text-[#D4AF37] font-black uppercase tracking-widest">{appState.proyeccion.subtitulo}</p>
+        </div>
+      )}
+
+      {appState.proyeccion.tipo === 'NADA' && (
+        <div className="animate-in space-y-10 opacity-20">
+          <Landmark size={200} className="text-white mx-auto" />
+          <h2 className="text-2xl font-institutional font-black text-white uppercase tracking-[1.5em]">Gran Recinto Almada Aquino</h2>
         </div>
       )}
     </div>
   );
 }
 
-function PresiSeatRole({ label, role, users, isMain }: any) {
-  const occupant = users.find((u: any) => u.cargo === role && u.confirmado);
-  return (
-    <div className={`flex flex-col items-center gap-7 ${isMain ? 'scale-125' : 'opacity-40 hover:opacity-100 transition-opacity'}`}>
-      <div className={`w-36 h-28 rounded-[3.5rem] bg-[#020617] border-4 border-slate-800 flex items-center justify-center text-white shadow-3xl relative ${isMain ? 'active-speaker gold-border' : ''}`}>
-        {occupant?.foto ? <img src={occupant.foto} className="w-full h-full rounded-[3.5rem] object-cover" /> : <Landmark size={48} />}
-      </div>
-      <span className="text-[14px] font-black uppercase tracking-widest text-slate-950 font-institutional text-center leading-none">{label}</span>
-    </div>
-  );
-}
+function SesionMasterView({ appState, updateSession, db, cerrarVotacion, setProyeccion }: any) {
+  const pedidosPalabra = appState.users.filter((u: User) => u.pedirPalabra === 'ESPERA');
 
-function VoteBtnStyle({ label, color, active, onClick }: any) {
   return (
-    <button onClick={onClick} className={`px-24 py-11 rounded-[3.5rem] font-black text-[16px] uppercase tracking-widest transition-all ${active ? 'bg-slate-950 text-white ring-[14px] ring-[#D4AF37] shadow-2xl scale-110' : `${color} text-white shadow-2xl hover:scale-105 active:scale-95`}`}>
-      {label}
-    </button>
-  );
-}
-
-function CredencialView({ user }: any) {
-  return (
-    <div className="flex items-center justify-center py-32 animate-in">
-      <div className="bg-white w-[700px] rounded-[8rem] shadow-[0_100px_200px_rgba(0,0,0,0.45)] overflow-hidden border border-slate-100 relative group border-t-[25px] border-[#D4AF37]">
-        <div className="h-80 bg-[#020617] p-32 flex items-start justify-between relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-20"><span className="text-[180px] font-institutional font-black text-white/5 italic leading-none">A-A</span></div>
-          <div className="gold-gradient p-7 rounded-[3.5rem] shadow-2xl relative z-10 animate-pulse"><Landmark size={70} className="text-white" /></div>
-          <div className="text-right relative z-10">
-            <p className="text-[16px] font-black text-white/30 uppercase tracking-[1em] mb-4">Parlamento Familiar</p>
-            <p className="text-[34px] font-institutional font-black text-white uppercase tracking-tight leading-none italic">Almada Aquino</p>
-            <p className="text-[14px] font-bold text-[#D4AF37] uppercase tracking-widest mt-8 flex items-center justify-end gap-3"><ShieldCheck size={20}/> Credencial Vitalicia</p>
+    <div className="space-y-12">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+        {/* CONTROL DE SESIÓN */}
+        <div className="bg-white p-12 rounded-[3.5rem] shadow-xl space-y-8 border-l-[15px] border-emerald-600">
+          <h3 className="text-2xl font-institutional font-black uppercase flex items-center gap-4"><Play size={28} className="text-emerald-600"/> Mando Superior</h3>
+          <div className="grid grid-cols-3 gap-4">
+            <button onClick={() => updateSession('ACTIVA')} className="bg-emerald-600 text-white py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:brightness-110">Abrir Sesión</button>
+            <button onClick={() => updateSession('CUARTO_INTERMEDIO')} className="bg-amber-600 text-white py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:brightness-110">Intermedio</button>
+            <button onClick={() => updateSession('CERRADA')} className="bg-rose-900 text-white py-6 rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg hover:brightness-110">Cerrar Sesión</button>
           </div>
         </div>
-        <div className="px-36 -mt-44 pb-36 flex flex-col items-center">
-          <div className="w-[22rem] h-[22rem] rounded-[7rem] border-[24px] border-white shadow-[0_50px_100px_rgba(0,0,0,0.3)] bg-slate-100 overflow-hidden mb-20 group-hover:scale-105 transition-transform duration-[2s] relative">
-            {user.foto ? <img src={user.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-slate-300 text-9xl font-institutional">{user.nombre[0]}</div>}
-            <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+
+        {/* PARTE DE LA SESIÓN (HIMNOS) */}
+        <div className="bg-white p-12 rounded-[3.5rem] shadow-xl space-y-8 border-l-[15px] border-[#D4AF37]">
+          <h3 className="text-2xl font-institutional font-black uppercase flex items-center gap-4"><Music size={28} className="text-[#D4AF37]"/> Parte de la Sesión</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <button onClick={() => setProyeccion('HIMNO', 'Himno Nacional Argentino')} className="bg-slate-50 text-slate-900 py-5 rounded-xl font-black uppercase text-[9px] border border-slate-100 flex items-center justify-center gap-2 hover:bg-white"><Music size={14}/> Himno Nacional</button>
+            <button onClick={() => setProyeccion('HIMNO', 'Himno a Misiones')} className="bg-slate-50 text-slate-900 py-5 rounded-xl font-black uppercase text-[9px] border border-slate-100 flex items-center justify-center gap-2 hover:bg-white"><Music size={14}/> Himno Misiones</button>
+            <button onClick={() => setProyeccion('HIMNO', 'Himno Puerto Esperanza')} className="bg-slate-50 text-slate-900 py-5 rounded-xl font-black uppercase text-[9px] border border-slate-100 flex items-center justify-center gap-2 hover:bg-white"><Music size={14}/> Himno P. Esperanza</button>
+            <button onClick={() => setProyeccion('HOMENAJE')} className="bg-slate-50 text-slate-900 py-5 rounded-xl font-black uppercase text-[9px] border border-slate-100 flex items-center justify-center gap-2 hover:bg-white"><Sparkles size={14}/> Homenajes</button>
+            <button onClick={() => setProyeccion('NADA')} className="col-span-2 bg-[#020617] text-white py-5 rounded-2xl font-black uppercase text-[9px] tracking-[0.4em] flex items-center justify-center gap-3 hover:brightness-150 transition-all"><Eraser size={18}/> Limpiar Pantalla de Proyección</button>
           </div>
-          <h3 className="text-9xl font-institutional font-black uppercase tracking-tighter text-slate-900 mb-6 leading-[0.7] text-center italic">{user.nombre} <br/> {user.apellido}</h3>
-          <div className="h-4 w-48 gold-gradient rounded-full mb-20 opacity-50" />
-          <p className="px-24 py-10 bg-[#020617] text-white rounded-[4rem] text-[20px] font-black uppercase tracking-[0.7em] mb-28 shadow-2xl border-b-[10px] border-[#D4AF37] italic">{user.cargo}</p>
-          <div className="w-full grid grid-cols-2 gap-x-40 gap-y-20">
-            <CredDataBlock label="DNI LEGISLATIVO" value={user.dni} />
-            <CredDataBlock label="POSICIÓN BANCAL" value={`CURUL ${user.banca + 1}`} />
-            <CredDataBlock label="NIVEL DE ACCESO" value="MAESTRO" />
-            <CredDataBlock label="RANGO" value="ELITE" />
-          </div>
-        </div>
-        <div className="h-24 gold-gradient flex items-center justify-center">
-          <span className="text-[16px] font-black text-white uppercase tracking-[2.5em] font-institutional">Almada Aquino • Casa de Leyes</span>
         </div>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+        {/* PEDIDOS DE PALABRA */}
+        <div className="bg-white p-12 rounded-[3.5rem] shadow-xl space-y-6">
+          <h3 className="text-2xl font-institutional font-black uppercase flex items-center gap-4 text-[#D4AF37]"><Mic2 size={28}/> Lista de Oradores</h3>
+          <div className="space-y-3">
+            {pedidosPalabra.length === 0 && <p className="text-[11px] text-slate-400 italic text-center p-8 bg-slate-50 rounded-2xl border-2 border-dashed">No hay pedidos pendientes.</p>}
+            {pedidosPalabra.map((u: User) => (
+              <div key={u.id} className="flex items-center justify-between p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 group hover:border-[#D4AF37] transition-all">
+                <span className="text-[13px] font-black uppercase tracking-tight">{u.nombre} {u.apellido}</span>
+                <button onClick={() => { db.get('config').put({ speakerId: u.id }); db.get('users').get(u.id).put({ pedirPalabra: 'CONCEDIDA' }); }} className="px-8 py-3 gold-gradient text-white rounded-full text-[10px] font-black uppercase shadow-xl hover:scale-105 transition-all">Conceder</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CONTROL DE VOTACIÓN ACTIVA */}
+        {appState.activeVote && (
+          <div className="bg-slate-950 p-12 rounded-[3.5rem] shadow-2xl text-center flex flex-col items-center justify-center space-y-10 border-b-[20px] border-[#D4AF37]">
+            <h4 className="text-white text-2xl font-institutional font-black uppercase italic leading-none">Votación en Curso: <br/> <span className="text-[#D4AF37] text-3xl">"{appState.activeVote.asunto}"</span></h4>
+            <button onClick={cerrarVotacion} className="gold-gradient px-12 py-5 rounded-full text-white font-black uppercase text-[11px] tracking-widest shadow-2xl hover:scale-110 active:scale-95 transition-all">Cerrar Escrutinio y Guardar</button>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
-function CredDataBlock({ label, value }: any) {
-  return (
-    <div className="flex flex-col border-b-4 border-slate-50 pb-10">
-      <span className="text-[16px] font-black text-slate-400 uppercase tracking-widest mb-5 font-institutional opacity-60">{label}</span>
-      <span className="text-[26px] font-black text-slate-950 uppercase tracking-tight">{value}</span>
-    </div>
-  );
-}
-
-function UsuariosView({ users, isAdmin, db }: any) {
-  const [form, setForm] = useState<any>({ nombre: '', apellido: '', dni: '', cargo: Role.DIPUTADO_FAMILIAR, banca: 0, foto: '' });
+function CensoView({ users, isAdmin, db }: any) {
+  const [form, setForm] = useState<any>({ nombre: '', apellido: '', dni: '', cargo: Role.DIPUTADO_FAMILIAR, banca: 0 });
 
   const register = () => {
     if (!form.nombre || !form.dni) return;
     const id = Math.random().toString(36).substr(2, 9);
-    db.get('users').get(id).put({ ...form, id, activo: true, confirmado: false, password: form.dni });
-    alert("DIPLOMÁTICO REGISTRADO CON ÉXITO.");
+    db.get('users').get(id).put({ ...form, id, activo: true, confirmado: false, presente: false, password: form.dni });
+    alert("DIPLOMÁTICO REGISTRADO.");
   };
 
   return (
-    <div className="space-y-24">
+    <div className="space-y-12">
       {isAdmin && (
-        <div className="bg-white p-28 rounded-[7rem] shadow-2xl border border-slate-100 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-16 opacity-5"><UserPlus size={150} /></div>
-          <h3 className="text-6xl font-institutional font-black uppercase mb-24 flex items-center gap-14 text-slate-900"><UserPlus size={70} className="text-[#D4AF37]" /> Censo Diplomático AA</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-20">
-            <InputFieldBlock label="Nombre Real" onChange={(v:any) => setForm({...form, nombre: v})} />
-            <InputFieldBlock label="Apellido Real" onChange={(v:any) => setForm({...form, apellido: v})} />
-            <InputFieldBlock label="DNI (Será su llave)" onChange={(v:any) => setForm({...form, dni: v})} />
-            <div className="flex flex-col gap-8">
-              <span className="text-[16px] font-black uppercase text-slate-400 ml-14 tracking-widest font-institutional">Designación Jurídica</span>
-              <select onChange={e => setForm({...form, cargo: e.target.value as Role})} className="p-11 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 font-bold outline-none focus:border-[#D4AF37] shadow-inner text-2xl transition-all">
-                {Object.values(Role).map(r => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </div>
-            <InputFieldBlock label="Curul Asignado (1-38)" type="number" onChange={(v:any) => setForm({...form, banca: Number(v)-1})} />
-            <button onClick={register} className="gold-gradient text-white px-24 py-11 rounded-[4.5rem] font-black uppercase text-[18px] tracking-[0.5em] shadow-2xl hover:scale-105 transition-all self-end italic">Confirmar Legajo</button>
+        <div className="bg-white p-12 rounded-[4rem] shadow-xl space-y-8 border-t-[10px] border-[#D4AF37]">
+          <h3 className="text-3xl font-institutional font-black uppercase flex items-center gap-6"><UserPlus size={36} className="text-[#D4AF37]"/> Registro del Censo AA</h3>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <input placeholder="Nombre" onChange={e => setForm({...form, nombre: e.target.value})} className="p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 font-bold" />
+            <input placeholder="Apellido" onChange={e => setForm({...form, apellido: e.target.value})} className="p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 font-bold" />
+            <input placeholder="DNI" onChange={e => setForm({...form, dni: e.target.value})} className="p-5 bg-slate-50 rounded-2xl border-2 border-slate-100 font-bold" />
+            <button onClick={register} className="gold-gradient text-white p-5 rounded-2xl font-black uppercase text-[11px] tracking-widest shadow-xl">Confirmar Legajo</button>
           </div>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-24">
-        {users.map((u: User) => (
-          <div key={u.id} className="bg-white p-24 rounded-[8rem] border border-slate-100 shadow-2xl flex flex-col items-center group transition-all relative overflow-hidden hover:translate-y-[-25px] hover:shadow-[0_80px_100px_-20px_rgba(0,0,0,0.1)]">
-            <div className="w-64 h-64 rounded-[5.5rem] bg-slate-100 overflow-hidden mb-20 shadow-2xl border-4 border-white transition-transform group-hover:scale-110">
-              {u.foto ? <img src={u.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-slate-300 text-8xl font-institutional">{u.nombre[0]}</div>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10">
+        {users.sort((a:any, b:any) => a.banca - b.banca).map((u: User) => (
+          <div key={u.id} className="bg-white p-10 rounded-[3.5rem] shadow-xl flex flex-col items-center text-center group border-2 border-slate-50 hover:border-[#D4AF37] transition-all relative overflow-hidden">
+            <div className="w-36 h-36 rounded-[2.5rem] bg-slate-100 overflow-hidden mb-6 border-4 border-white shadow-2xl group-hover:scale-110 transition-all">
+              {u.foto ? <img src={u.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-4xl font-black text-slate-300 font-institutional">{u.nombre?.[0] || 'L'}</div>}
             </div>
-            <h4 className="text-5xl font-institutional font-black uppercase text-center text-slate-900 mb-8 tracking-tighter leading-[0.75] italic">{u.nombre} <br/> {u.apellido}</h4>
-            <p className="text-[17px] font-bold text-[#D4AF37] uppercase tracking-widest mb-20 text-center italic opacity-80">{u.cargo}</p>
-            {isAdmin && (
-              <button onClick={() => confirm("¿Expulsar del Recinto?") && db.get('users').get(u.id).put(null)} className="p-8 bg-rose-50 text-rose-600 rounded-[3.5rem] hover:bg-rose-600 hover:text-white transition-all shadow-lg"><Trash2 size={32}/></button>
-            )}
+            <h4 className="text-2xl font-institutional font-black uppercase leading-[0.8] mb-4 italic">{u.nombre} <br/> {u.apellido}</h4>
+            <span className="text-[9px] font-black text-[#D4AF37] uppercase tracking-widest mb-6">{u.cargo}</span>
+            <div className="flex gap-3">
+              {isAdmin && <button onClick={() => { const url = prompt("URL de Foto:"); if(url) db.get('users').get(u.id).put({ foto: url }) }} className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:bg-[#D4AF37] hover:text-white transition-all"><Camera size={18}/></button>}
+              {isAdmin && <button onClick={() => { if(confirm("¿Eliminar?")) db.get('users').get(u.id).put(null); }} className="p-3 bg-rose-50 text-rose-300 rounded-xl hover:bg-rose-600 hover:text-white transition-all"><Trash2 size={18}/></button>}
+            </div>
+            <div className={`absolute top-6 right-6 w-3 h-3 rounded-full ${u.presente ? 'bg-emerald-500 shadow-[0_0_10px_#10b981]' : 'bg-rose-500'}`} />
           </div>
         ))}
       </div>
@@ -469,11 +489,96 @@ function UsuariosView({ users, isAdmin, db }: any) {
   );
 }
 
-function InputFieldBlock({ label, type = "text", onChange }: any) {
+function RecintoView({ users, appState, currentUser, isAdmin, db }: any) {
+  const handleVoto = (tipo: VoteType) => {
+    db.get('users').get(currentUser.id).put({ votoActual: tipo });
+  };
+
+  const solicitarPalabra = () => {
+    db.get('users').get(currentUser.id).put({ pedirPalabra: 'ESPERA' });
+    alert("PEDIDO DE PALABRA ELEVADO A PRESIDENCIA.");
+  };
+
   return (
-    <div className="flex flex-col gap-8">
-      <span className="text-[16px] font-black uppercase text-slate-400 ml-14 tracking-widest font-institutional">{label}</span>
-      <input type={type} onChange={e => onChange(e.target.value)} className="p-11 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold shadow-inner text-2xl transition-all" placeholder="..." />
+    <div className="bg-[#020617] p-24 rounded-[5rem] min-h-[1000px] flex flex-col items-center relative overflow-hidden shadow-[0_80px_150px_-40px_rgba(0,0,0,0.8)] border-b-[20px] border-slate-950">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(212,175,55,0.12),transparent)] pointer-events-none" />
+      
+      {/* ESTRADO */}
+      <div className="w-[850px] h-44 bg-white/95 rounded-t-[160px] shadow-[0_-15px_80px_rgba(212,175,55,0.15)] flex flex-col items-center justify-center border-b-[20px] border-slate-200 relative z-30">
+        <Landmark size={44} className="text-[#D4AF37] mb-3" />
+        <p className="text-[11px] font-institutional font-black text-slate-400 tracking-[1.2em] uppercase italic">Estrado Superior AA</p>
+      </div>
+
+      {/* HEMICICLO */}
+      <div className="mt-36 senate-arc max-w-[110rem] relative z-10 px-10">
+        {Array.from({ length: 38 }).map((_, i) => {
+          const u = users.find((x:any) => x.banca === i && x.confirmado && x.presente);
+          let seatBase = 'bg-slate-900/40 border-slate-800 opacity-20';
+          let isSpeaking = u?.id === appState.speakerId;
+          
+          if (u) {
+            seatBase = 'bg-white border-white scale-110 shadow-2xl';
+            if (u.votoActual === 'YES') seatBase = 'bg-emerald-600 border-emerald-400 shadow-[0_0_40px_rgba(16,185,129,0.5)]';
+            if (u.votoActual === 'NO') seatBase = 'bg-rose-600 border-rose-400 shadow-[0_0_40px_rgba(244,63,94,0.5)]';
+            if (u.votoActual === 'ABSTAIN') seatBase = 'bg-amber-500 border-amber-300 shadow-[0_0_40px_rgba(245,158,11,0.5)]';
+          }
+
+          return (
+            <div key={i} className={`banca-seat flex items-center justify-center border-[3px] ${seatBase} ${isSpeaking ? 'active-speaker scale-[1.4]' : ''}`}>
+              <span className="absolute -top-8 text-[8px] font-black text-white/20 uppercase tracking-widest italic">{i + 1}</span>
+              {u && (
+                <div className="w-full h-full rounded-[1.1rem] overflow-hidden">
+                  {u.foto ? <img src={u.foto} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center font-black text-slate-900 text-2xl font-institutional">{u.nombre?.[0] || 'L'}</div>}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* CONTROLES FLOTANTES */}
+      <div className="fixed bottom-12 left-1/2 -translate-x-1/2 flex gap-6 z-50">
+        <button onClick={solicitarPalabra} className="px-10 py-4 bg-slate-950 text-white rounded-full font-black uppercase text-[10px] tracking-widest shadow-2xl border-2 border-[#D4AF37]/40 hover:gold-gradient hover:scale-110 transition-all flex items-center gap-3">
+           <Mic2 size={16} className="text-[#D4AF37]" /> Pedir Palabra
+        </button>
+        
+        {appState.activeVote && (
+          <div className="bg-white/95 p-8 rounded-[3.5rem] shadow-2xl flex flex-col items-center border-[3px] border-[#D4AF37]/30 backdrop-blur-3xl animate-in">
+            <p className="text-[9px] font-black uppercase text-slate-400 mb-5 tracking-[0.3em] font-institutional">Emisión de Voto: {appState.activeVote.asunto}</p>
+            <div className="flex gap-3">
+              <button onClick={() => handleVoto('YES')} className={`px-8 py-3.5 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${currentUser.votoActual === 'YES' ? 'bg-emerald-600 text-white scale-110 shadow-2xl border-4 border-emerald-300' : 'bg-slate-100 text-emerald-600 hover:bg-emerald-50'}`}>Positivo</button>
+              <button onClick={() => handleVoto('NO')} className={`px-8 py-3.5 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${currentUser.votoActual === 'NO' ? 'bg-rose-600 text-white scale-110 shadow-2xl border-4 border-rose-300' : 'bg-slate-100 text-rose-600 hover:bg-rose-50'}`}>Negativo</button>
+              <button onClick={() => handleVoto('ABSTAIN')} className={`px-8 py-3.5 rounded-full font-black text-[10px] uppercase tracking-widest transition-all ${currentUser.votoActual === 'ABSTAIN' ? 'bg-amber-500 text-white scale-110 shadow-2xl border-4 border-amber-200' : 'bg-slate-100 text-amber-600 hover:bg-amber-50'}`}>Abstención</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function HistorialView({ historial }: { historial: VotoGuardado[] }) {
+  return (
+    <div className="space-y-12">
+      <h3 className="text-4xl font-institutional font-black uppercase border-b-4 border-[#D4AF37] inline-block pb-3">Archivo Histórico Legislativo</h3>
+      <div className="space-y-10">
+        {historial.length === 0 && <p className="text-slate-400 italic text-2xl p-20 text-center">No hay leyes archivadas.</p>}
+        {historial.sort((a,b) => b.fecha.localeCompare(a.fecha)).map(v => (
+          <div key={v.id} className="bg-white p-12 rounded-[3.5rem] shadow-xl border-l-[20px] border-[#D4AF37] group hover:translate-x-3 transition-all">
+            <div className="flex justify-between items-start mb-6">
+              <span className="text-[11px] font-black text-slate-300 uppercase tracking-widest">{v.fecha}</span>
+              <span className={`px-8 py-2.5 rounded-full text-[11px] font-black uppercase shadow-sm ${v.resultado === 'APROBADA' ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-rose-50 text-rose-600 border border-rose-100'}`}>{v.resultado}</span>
+            </div>
+            <h4 className="text-4xl font-institutional font-black uppercase mb-8 leading-tight italic">"{v.asunto}"</h4>
+            <div className="bg-slate-50 p-8 rounded-[2.5rem] border-2 border-slate-100">
+               <div className="flex items-center gap-4 text-slate-700">
+                 <Info size={22} className="text-[#D4AF37]" />
+                 <p className="text-[13px] font-black uppercase italic leading-relaxed">{v.textoDetalle}</p>
+               </div>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -482,47 +587,39 @@ function MocionesView({ mociones, user, isAdmin, db }: any) {
   const [t, setT] = useState('');
   const [d, setD] = useState('');
 
-  const submitMocion = () => {
+  const submit = () => {
     if (!t || !d) return;
     const id = Math.random().toString(36).substr(2, 9);
     db.get('mociones').get(id).put({ id, titulo: t, descripcion: d, proponenteNombre: user.nombre, proponenteId: user.id, estado: 'PENDIENTE', fecha: new Date().toLocaleString() });
-    setT(''); setD(''); alert("MOCIÓN ELEVADA AL GRAN CONSEJO.");
+    setT(''); setD(''); alert("MOCIÓN ENVIADA.");
   };
 
-  const handleMocionAction = (m: any, action: string) => {
-    db.get('mociones').get(m.id).put({ estado: action });
-    if (action === 'RECINTO') {
-      db.get('config').put({ activeVote: JSON.stringify({ activa: true, asunto: m.titulo, inicio: new Date().toISOString() }) });
-    }
+  const llevarRecinto = (m: any) => {
+    db.get('config').put({ activeVote: JSON.stringify({ activa: true, asunto: m.titulo, idMocion: m.id }) });
+    db.get('mociones').get(m.id).put({ estado: 'RECINTO' });
   };
 
   return (
-    <div className="space-y-24">
-      <div className="bg-white p-28 rounded-[7rem] shadow-2xl border border-slate-100 space-y-14 relative overflow-hidden">
-        <div className="absolute top-0 right-0 p-16 opacity-5"><FileText size={150} /></div>
-        <h3 className="text-6xl font-institutional font-black uppercase flex items-center gap-14"><FileText size={80} className="text-[#D4AF37]"/> Nueva Moción Diplomática</h3>
-        <input placeholder="Titular de la propuesta legislativa..." value={t} onChange={e => setT(e.target.value)} className="w-full p-14 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-black text-4xl tracking-tighter shadow-inner" />
-        <textarea placeholder="Exponga detalladamente los fundamentos de su moción familiar..." value={d} onChange={e => setD(e.target.value)} className="w-full p-14 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold h-[22rem] text-3xl shadow-inner leading-relaxed" />
-        <button onClick={submitMocion} className="gold-gradient text-white px-36 py-11 rounded-[4.5rem] font-black uppercase text-[20px] tracking-[0.6em] shadow-2xl hover:scale-105 transition-all italic">Elevar Petición</button>
+    <div className="space-y-12">
+      <div className="bg-white p-14 rounded-[3.5rem] shadow-xl space-y-8 border-t-[10px] border-[#D4AF37]">
+        <h3 className="text-3xl font-institutional font-black uppercase flex items-center gap-5 text-[#D4AF37]"><FileText size={36}/> Nueva Moción</h3>
+        <input placeholder="Titular de la propuesta..." value={t} onChange={e => setT(e.target.value)} className="w-full p-6 bg-slate-50 rounded-[2rem] border-2 border-slate-100 font-black text-2xl shadow-inner outline-none focus:border-[#D4AF37]" />
+        <textarea placeholder="Explicación detallada de la propuesta..." value={d} onChange={e => setD(e.target.value)} className="w-full p-6 bg-slate-50 rounded-[2rem] border-2 border-slate-100 font-bold h-44 shadow-inner outline-none focus:border-[#D4AF37] text-lg" />
+        <button onClick={submit} className="gold-gradient text-white px-12 py-5 rounded-full font-black uppercase text-[12px] shadow-2xl italic tracking-widest hover:scale-105 transition-all">Elevar Moción al Recinto</button>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-24">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
         {mociones.filter(m => m.estado !== 'ARCHIVADA').sort((a,b) => b.fecha.localeCompare(a.fecha)).map(m => (
-          <div key={m.id} className="bg-white p-24 rounded-[8rem] shadow-2xl border border-slate-100 flex flex-col relative group transition-all hover:translate-y-[-25px] hover:shadow-[0_80px_100px_-20px_rgba(0,0,0,0.1)]">
-            <div className="flex justify-between items-start mb-20">
-              <span className="text-[17px] font-black text-slate-300 uppercase italic font-institutional opacity-60">{m.fecha}</span>
-              <span className={`px-14 py-6 rounded-full text-[14px] font-black uppercase tracking-widest shadow-2xl ${m.estado === 'PENDIENTE' ? 'bg-slate-100 text-slate-400' : 'bg-rose-100 text-rose-600 animate-pulse border-2 border-rose-200'}`}>{m.estado}</span>
+          <div key={m.id} className="bg-white p-10 rounded-[3.5rem] shadow-xl border-l-[15px] border-slate-100 flex flex-col group hover:-translate-y-2 transition-all">
+            <span className="text-[9px] font-black text-slate-300 uppercase mb-4 tracking-widest">{m.fecha}</span>
+            <h4 className="text-3xl font-institutional font-black uppercase mb-5 italic leading-none group-hover:text-[#D4AF37]">"{m.titulo}"</h4>
+            <p className="text-slate-500 text-lg italic mb-10 flex-1 leading-relaxed">"{m.descripcion}"</p>
+            <div className="pt-6 border-t border-slate-50 flex justify-between items-center">
+               <span className="text-[9px] font-bold text-slate-400 uppercase">Proponente: <span className="text-slate-900">{m.proponenteNombre}</span></span>
+               {isAdmin && m.estado === 'PENDIENTE' && (
+                <button onClick={() => llevarRecinto(m)} className="gold-gradient px-8 py-3 rounded-full text-white font-black uppercase text-[9px] tracking-widest shadow-xl">VOTAR AHORA</button>
+               )}
             </div>
-            <h4 className="text-[5rem] font-institutional font-black uppercase tracking-tighter mb-16 leading-[0.75] italic group-hover:text-[#D4AF37] transition-colors">"{m.titulo}"</h4>
-            <p className="text-[16px] font-bold text-slate-400 uppercase tracking-widest mb-16 italic">Legislador Proponente: <span className="text-slate-900">{m.proponenteNombre}</span></p>
-            <p className="text-3xl text-slate-600 font-medium italic mb-24 flex-1 leading-[1.4] opacity-80">" {m.descripcion} "</p>
-            
-            {isAdmin && m.estado === 'PENDIENTE' && (
-              <div className="flex gap-10 pt-20 border-t-4 border-slate-50">
-                <button onClick={() => handleMocionAction(m, 'RECINTO')} className="flex-1 gold-gradient text-white py-10 rounded-[3.5rem] font-black text-[17px] uppercase tracking-widest shadow-2xl italic">Llevar a Estrado</button>
-                <button onClick={() => handleMocionAction(m, 'RECHAZADA')} className="flex-1 bg-rose-900 text-white py-10 rounded-[3.5rem] font-black text-[17px] uppercase tracking-widest shadow-2xl italic">Rechazar</button>
-              </div>
-            )}
           </div>
         ))}
       </div>
@@ -535,55 +632,98 @@ function FinanzasView({ finanzas, db }: any) {
   const [d, setD] = useState('');
   const total = useMemo(() => finanzas.reduce((acc, cur) => cur.tipo === 'INGRESO' ? acc + Number(cur.monto) : acc - Number(cur.monto), 0), [finanzas]);
 
-  const addMov = (tipo: 'INGRESO' | 'EGRESO') => {
-    if(!m || !d) return;
-    const id = Math.random().toString(36).substr(2, 9);
-    db.get('finanzas').get(id).put({ id, monto: m, tipo, descripcion: d, fecha: new Date().toLocaleString() });
-    setM(0); setD('');
+  return (
+    <div className="space-y-12">
+      <div className="navy-gradient p-20 rounded-[4rem] text-white shadow-2xl text-center border-b-[25px] border-[#D4AF37] relative overflow-hidden group">
+        <div className="absolute inset-0 marble-pattern opacity-10 pointer-events-none" />
+        <p className="text-[#D4AF37] font-black uppercase text-[12px] tracking-[0.8em] mb-6 font-institutional relative z-10">Tesorería General AA:</p>
+        <h2 className="text-[10rem] font-black italic tracking-tighter leading-none relative z-10 group-hover:scale-105 transition-all duration-700">${total.toLocaleString()}</h2>
+        <DollarSign size={400} className="absolute -right-20 -bottom-20 text-white/5 rotate-12" />
+      </div>
+
+      <div className="bg-white p-10 rounded-[3.5rem] shadow-xl grid grid-cols-1 md:grid-cols-4 gap-6">
+        <input type="number" value={m || ''} placeholder="Monto $" onChange={e => setM(Number(e.target.value))} className="p-6 bg-slate-50 rounded-3xl border-2 border-slate-100 font-black text-4xl text-center outline-none focus:border-[#D4AF37]" />
+        <input placeholder="Concepto..." value={d} onChange={e => setD(e.target.value)} className="p-6 bg-slate-50 rounded-3xl border-2 border-slate-100 font-bold text-xl outline-none focus:border-[#D4AF37]" />
+        <button onClick={() => { db.get('finanzas').get(Math.random().toString()).put({monto: m, tipo: 'INGRESO', descripcion: d, fecha: new Date().toLocaleString()}); setM(0); setD(''); }} className="gold-gradient text-white rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-xl">Ingreso</button>
+        <button onClick={() => { db.get('finanzas').get(Math.random().toString()).put({monto: m, tipo: 'EGRESO', descripcion: d, fecha: new Date().toLocaleString()}); setM(0); setD(''); }} className="bg-rose-900 text-white rounded-3xl font-black uppercase text-[10px] tracking-widest shadow-xl">Egreso</button>
+      </div>
+    </div>
+  );
+}
+
+function EstatutosView() {
+  return (
+    <div className="bg-white p-20 rounded-[4rem] shadow-2xl space-y-12 border-t-[15px] border-[#D4AF37]">
+      <h3 className="text-5xl font-institutional font-black uppercase border-b-2 pb-6 flex items-center gap-6"><ScrollText size={56} className="text-[#D4AF37]"/> Leyes y Estatutos</h3>
+      <div className="space-y-8 text-2xl text-slate-700 italic leading-relaxed font-medium">
+        <p className="p-8 bg-slate-50 rounded-[2.5rem] border-l-[15px] border-[#D4AF37]"><strong>Art I:</strong> La soberanía reside en la Lista 001. La Presidencia es la autoridad suprema del recinto.</p>
+        <p className="p-8 bg-slate-50 rounded-[2.5rem] border-l-[15px] border-slate-200"><strong>Art II:</strong> La palabra debe ser concedida por el estrado. El silencio es obligatorio durante las mociones.</p>
+        <p className="p-8 bg-slate-50 rounded-[2.5rem] border-l-[15px] border-slate-200"><strong>Art III:</strong> Todo legislador debe dar el presente para validar su banca y su voto.</p>
+        <p className="p-8 bg-slate-50 rounded-[2.5rem] border-l-[15px] border-slate-200"><strong>Art IV:</strong> Las finanzas son de auditoría pública para todos los miembros del parlamento.</p>
+      </div>
+    </div>
+  );
+}
+
+function SecretariasView() {
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-12">
+      <SecCard title="Actas y Papeles" icon={<FileBox size={50}/>} desc="Gestión de documentos oficiales." />
+      <SecCard title="Archivos Históricos" icon={<Archive size={50}/>} desc="Memoria viva de Puerto Esperanza." />
+      <SecCard title="Mesa de Entradas" icon={<Send size={50}/>} desc="Recepción de mociones y pedidos." />
+    </div>
+  );
+}
+
+function SecCard({ title, icon, desc }: any) {
+  return (
+    <div className="bg-white p-14 rounded-[4rem] shadow-2xl text-center space-y-6 border-2 border-slate-50 hover:scale-105 transition-all group">
+      <div className="text-[#D4AF37] flex justify-center group-hover:rotate-12 transition-all">{icon}</div>
+      <h4 className="text-2xl font-institutional font-black uppercase tracking-tight">{title}</h4>
+      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">{desc}</p>
+      <button className="gold-gradient px-8 py-3 rounded-full text-white font-black uppercase text-[9px] shadow-lg">Abrir Secretaría</button>
+    </div>
+  );
+}
+
+function JuegosView() {
+  return (
+    <div className="bg-slate-900 p-24 rounded-[5rem] shadow-2xl text-center space-y-10 min-h-[500px] flex flex-col items-center justify-center relative overflow-hidden">
+      <div className="absolute inset-0 marble-pattern opacity-5 pointer-events-none" />
+      <Gamepad2 size={100} className="text-slate-700 animate-pulse" />
+      <h3 className="text-5xl font-institutional font-black uppercase text-white tracking-widest">Receso Legislativo</h3>
+      <p className="text-xl text-slate-500 italic max-w-xl mx-auto">"Sección de esparcimiento para tiempos de intermedio. Momentos de paz tras la política familiar."</p>
+    </div>
+  );
+}
+
+function AdvisorView() {
+  const [prompt, setPrompt] = useState('');
+  const [response, setResponse] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const ask = async () => {
+    if(!prompt) return;
+    setLoading(true);
+    const res = await geminiAssistant.askAdvisor(prompt);
+    setResponse(res);
+    setLoading(false);
   };
 
   return (
-    <div className="space-y-28">
-      <div className="navy-gradient p-36 rounded-[9rem] text-white shadow-[0_100px_180px_-40px_rgba(0,0,0,0.8)] relative overflow-hidden group border-b-[40px] border-[#D4AF37]">
-        <div className="absolute inset-0 marble-pattern opacity-10 pointer-events-none" />
-        <div className="relative z-10 text-center lg:text-left">
-          <p className="text-[#D4AF37] font-black uppercase text-[22px] tracking-[1em] mb-16 font-institutional">Fondo del Gran Parlamento Familiar:</p>
-          <h2 className="text-[16rem] font-black tracking-tighter leading-none group-hover:scale-[1.05] transition-transform duration-1000 italic">${total.toLocaleString()}</h2>
+    <div className="bg-white p-16 rounded-[4rem] shadow-2xl space-y-10 border-t-[10px] border-[#D4AF37]">
+        <h3 className="text-4xl font-institutional font-black uppercase flex items-center gap-6"><BrainCircuit size={48} className="text-[#D4AF37]"/> Asesor Superior</h3>
+        <div className="space-y-6">
+            <textarea value={prompt} onChange={e => setPrompt(e.target.value)} className="w-full p-8 bg-slate-50 rounded-[2.5rem] border-2 border-slate-100 font-bold h-32 outline-none focus:border-[#D4AF37] text-xl" placeholder="Consulte al asesor sobre una ley o conflicto familiar..." />
+            <button onClick={ask} disabled={loading} className="gold-gradient text-white px-12 py-5 rounded-full font-black uppercase text-[12px] shadow-2xl italic tracking-widest">
+                {loading ? 'Consultando al Gran Consejo...' : 'Solicitar Dictamen'}
+            </button>
         </div>
-        <DollarSign size={600} className="absolute -right-56 -bottom-56 text-white/5 rotate-12 transition-all duration-[6s] group-hover:rotate-45" />
-      </div>
-
-      <div className="bg-white p-28 rounded-[8rem] shadow-2xl border border-slate-100 grid grid-cols-1 md:grid-cols-4 gap-14 relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 gold-gradient opacity-30" />
-        <input type="number" value={m || ''} placeholder="Monto $" onChange={e => setM(Number(e.target.value))} className="p-14 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-black text-6xl text-center shadow-inner" />
-        <input placeholder="Concepto del movimiento diplomático..." value={d} onChange={e => setD(e.target.value)} className="p-14 bg-slate-50 rounded-[4.5rem] border-2 border-slate-100 focus:border-[#D4AF37] outline-none font-bold text-3xl shadow-inner italic" />
-        <button onClick={() => addMov('INGRESO')} className="gold-gradient text-white rounded-[4.5rem] font-black uppercase text-[18px] tracking-[0.4em] shadow-2xl hover:scale-110 active:scale-95 transition-all italic">Ingreso</button>
-        <button onClick={() => addMov('EGRESO')} className="bg-rose-900 text-white rounded-[4.5rem] font-black uppercase text-[18px] tracking-[0.4em] shadow-2xl hover:scale-110 active:scale-95 transition-all italic">Egreso</button>
-      </div>
-
-      <div className="bg-white rounded-[9rem] shadow-2xl border border-slate-100 overflow-hidden relative">
-        <div className="absolute top-0 right-0 p-10 opacity-5"><Activity size={100} /></div>
-        <table className="w-full text-left">
-          <thead className="bg-slate-50/90 border-b-[6px] border-slate-100">
-            <tr>
-              <th className="p-24 text-[20px] font-black uppercase tracking-[0.6em] text-slate-400 font-institutional">Cronología</th>
-              <th className="p-24 text-[20px] font-black uppercase tracking-[0.6em] text-slate-400 font-institutional">Concepto de Honor</th>
-              <th className="p-24 text-[20px] font-black uppercase tracking-[0.6em] text-slate-400 text-right font-institutional">Balance Neto</th>
-            </tr>
-          </thead>
-          <tbody>
-            {finanzas.sort((a,b) => b.fecha.localeCompare(a.fecha)).map(f => (
-              <tr key={f.id} className="border-b-2 border-slate-50 last:border-0 hover:bg-slate-50/70 transition-colors duration-700">
-                <td className="p-24 text-[20px] font-bold text-slate-400 uppercase tracking-tighter opacity-70">{f.fecha}</td>
-                <td className="p-24 text-5xl font-institutional font-black uppercase text-slate-950 tracking-tighter italic">" {f.descripcion} "</td>
-                <td className={`p-24 text-[5rem] font-black text-right ${f.tipo === 'INGRESO' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                  {f.tipo === 'INGRESO' ? '+' : '-'}${f.monto.toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+        {response && (
+            <div className="p-10 bg-[#020617] text-white rounded-[3rem] border-l-[15px] border-[#D4AF37] animate-in italic leading-relaxed text-lg">
+                <p className="opacity-80">"{response}"</p>
+            </div>
+        )}
     </div>
   );
 }

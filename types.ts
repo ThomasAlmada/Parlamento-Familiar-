@@ -20,13 +20,32 @@ export interface User {
   apellido: string;
   cargo: Role;
   curso: string;
-  foto?: string; // Base64
+  foto?: string;
   confirmado: boolean; 
+  presente: boolean;
   votoActual: VoteType;
   pedirPalabra: 'NINGUNO' | 'ESPERA' | 'CONCEDIDA' | 'RECHAZADA';
   activo: boolean;
-  banca: number; // 0 a 37
-  password?: string; // Para la credencial
+  banca: number;
+  password?: string;
+}
+
+export interface VotoGuardado {
+  id: string;
+  asunto: string;
+  fecha: string;
+  resultado: 'APROBADA' | 'RECHAZADA';
+  totalSi: number;
+  totalNo: number;
+  totalAbstencion: number;
+  textoDetalle: string; // Formato pedido: "Persona A: Afirmativo, Persona B: ..."
+}
+
+export interface Acta {
+  id: string;
+  titulo: string;
+  contenido: string;
+  fecha: string;
 }
 
 export interface Moción {
@@ -47,39 +66,19 @@ export interface MovimientoFinanciero {
   fecha: string;
 }
 
-export interface Sancion {
-  id: string;
-  userId: string;
-  userName: string;
-  motivo: string;
-  gravedad: 'LEVE' | 'MEDIA' | 'GRAVE';
-  fecha: string;
-}
-
-export interface NewsItem {
-  id: string;
-  titulo: string;
-  contenido: string;
-  fecha: string;
-  imagen?: string;
-}
-
-export interface VoteSession {
-  activa: boolean;
-  asunto: string;
-  inicio: string;
-}
-
 export interface AppState {
   users: User[];
   mociones: Moción[];
   finanzas: MovimientoFinanciero[];
-  sanciones: Sancion[];
-  noticias: NewsItem[];
-  activeVote: VoteSession | null;
+  votosHistorial: VotoGuardado[];
+  actas: Acta[];
+  activeVote: { activa: boolean, asunto: string, idMocion?: string } | null;
   sessionStatus: SessionStatus;
   speakerId: string | null;
+  proyeccion: {
+    tipo: 'NADA' | 'HIMNO' | 'HOMENAJE' | 'RESULTADO' | 'LIMPIAR';
+    titulo?: string;
+    subtitulo?: string;
+  };
   sessionStartTime: string | null;
-  waitingList: string[];
-  intermissionTimer: number | null;
 }

@@ -10,10 +10,11 @@ export const INITIAL_USERS: User[] = [
     cargo: Role.PRESIDENTE,
     curso: 'ALMADA-AQUINO',
     confirmado: true,
+    presente: true,
     votoActual: null,
     pedirPalabra: 'NINGUNO',
     activo: true,
     banca: 0,
-    password: 'ADMIN'
+    password: '49993070'
   }
 ];
